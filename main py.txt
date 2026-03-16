@@ -1,0 +1,84 @@
+main.py:import requests
+from bs4 import BeautifulSoup
+import json
+from collections import Counter
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+import uvicorn
+
+# 1. Setup the API App
+app = FastAPI(title="Ethiopia Lottery Predictor API")
+
+# Enable CORS so your website can talk to this script
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+def get_live_lottery_data():
+    """Scrapes the Ethiopian Lottery website for historical results."""
+    url = "https://www.ethiolottery.et/am"
+    headers = {"User-Agent": "Mozilla/5.0"}
+    
+    try:
+        response = requests.get(url, headers=headers)
+        soup = BeautifulSoup(response.text, 'html.parser')
+        next_data_script = soup.find('script', id='__NEXT_DATA__')
+        
+        if next_data_script:
+            data = json.loads(next_data_script.string)
+            # This path navigates the Next.js JSON structure
+            return data.get('props', {}).get('pageProps', {}).get('lotteries', [])
+        return []
+    except Exception as e:
+        print(f"Scraping Error: {e}")
+        return []
+
+@app.get("/predict")
+async def predict():
+    """The main logic for the predictor."""
+    lottery_list = get_live_lottery_data()
+    
+    if not lottery_list:
+        return {"error": "Could not fetch data"}
+
+    # Extract all winning numbers into one big list
+    all_numbers = []
+    for draw in lottery_list:
+        win_str = draw.get('winning_numbers', "") # Example: "04, 12, 45..."
+        if win_str:
+            # Clean and split the string into individual numbers
+            nums = [n.strip() for n in win_str.replace("-", ",").split(",") if n.strip()]
+            all_numbers.extend(nums)
+
+    # ALGORITHM 1: Hot Numbers (Most Frequent)
+    counts = Counter(all_numbers)
+    hot_numbers = [num for num, freq in counts.most_common(6)]
+
+    # ALGORITHM 2: Smart Random (Weighted by frequency)
+    # This feels more "AI" to users than just random numbers
+    import random
+    unique_nums = list(counts.keys())
+    weights = [counts[n] for n in unique_nums]
+    smart_pick = random.choices(unique_nums, weights=weights, k=6)
+
+    return {
+        "success": True,
+        "results_analyzed": len(lottery_list),
+        "predictions": {
+            "hot_numbers": hot_numbers,
+            "smart_ai_pick": sorted(list(set(smart_pick))),
+            "most_common_individual_number": counts.most_common(1)[0][0]
+        },
+        "last_draw": lottery_list[0] if lottery_list else None
+    }
+
+@app.get("/")
+def home():
+    return {"message": "Lottery Predictor API is Running. Go to /predict"}
+
+if name == "__main__":
+    # Runs the server on http://localhost:8000
+    uvicorn.run(app, host="0.0.0.0", port=8000)

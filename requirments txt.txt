@@ -1,0 +1,5 @@
+requirments.txt:
+fastapi
+uvicorn
+requests
+beautifulsoup4
